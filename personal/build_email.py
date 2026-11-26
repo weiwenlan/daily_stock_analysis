@@ -31,9 +31,10 @@ def cell(value: str | None) -> str:
 
 
 lines = [f"# 美股每日分析 {date}", ""]
-counts = re.search(r"共分析 \*\*\d+\*\* 只股票 \| (.+)", s)
-if counts:
-    lines += [f"**{counts.group(1).strip()}**", ""]
+verdicts = re.findall(r"### 📌 核心结论\s+\*\*\S+ ([^*]+)\*\*", s)
+if verdicts:
+    tally = {v.strip(): verdicts.count(v) for v in dict.fromkeys(verdicts)}
+    lines += ["**" + f"{len(verdicts)} 只：" + " · ".join(f"{k} {n}" for k, n in tally.items()) + "**", ""]
 
 review = sorted(reports.glob("market_review_*.md"))
 if review:
@@ -47,7 +48,7 @@ if review:
         lines += [plan, ""]
 
 lines += ["## 个股", "", "| 股票 | 结论 | 一句话 | 持仓者怎么做 |", "|---|---|---|---|"]
-for block in re.split(r"\n## (?=\S+ )", s)[1:]:
+for block in re.split(r"\n## (?=\S+ .+ \([\w.\-]+\)\s*$)", s, flags=re.M)[1:]:
     m = re.match(r"\S+ (.+?) \((\w[\w.\-]*)\)", block.splitlines()[0])
     if not m:
         continue

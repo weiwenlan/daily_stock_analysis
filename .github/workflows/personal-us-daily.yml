@@ -38,7 +38,7 @@ jobs:
         env:
           STOCK_LIST: ${{ vars.STOCK_LIST }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          LITELLM_MODEL: ${{ vars.LITELLM_MODEL || 'deepseek/deepseek-v4-pro' }}
+          LITELLM_MODEL: ${{ vars.LITELLM_MODEL || 'deepseek/deepseek-v4-flash' }}
           TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           REPORT_LANGUAGE: zh
           MARKET_REVIEW_ENABLED: 'true'
@@ -51,6 +51,23 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "::notice::US market closed today; no email sent"
           fi
+      - name: Retry failed stocks once
+        if: steps.analyze.outputs.skip != 'true'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          LITELLM_MODEL: ${{ vars.LITELLM_MODEL || 'deepseek/deepseek-v4-flash' }}
+          TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
+          REPORT_LANGUAGE: zh
+          MARKET_REVIEW_REGION: us
+          MAX_WORKERS: '2'
+        run: |
+          FAILED=$(grep -oE "\[[A-Z.\-]+\*?\] Analysis (unsuccessful|result marked as failed)|\[[A-Z.\-]+\] Cancelled due to timeout" /tmp/analyze.log | grep -oE "^\[[A-Z.\-]+" | tr -d '[' | sort -u | paste -sd, -)
+          if [ -z "$FAILED" ]; then echo "nothing to retry"; exit 0; fi
+          echo "retrying: $FAILED"
+          cp reports/report_*.md /tmp/first_report.md
+          set -o pipefail
+          python main.py --no-notify --no-market-review --force-run --stocks "$FAILED" 2>&1 | tee /tmp/retry.log || true
+          python personal/merge_reports.py /tmp/first_report.md reports
 
       - name: Restore Gmail OAuth files
         if: always() && steps.analyze.outputs.skip != 'true'
