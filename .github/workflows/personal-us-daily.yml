@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: '30 21 * * 1-5'   # 21:30 UTC = 13:30 PST, after the US close
   workflow_dispatch:
+    inputs:
+      force:
+        description: Run even when the US market is closed
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +34,7 @@ jobs:
       - run: pip install -r requirements.txt markdown premailer
 
       - name: Analyze
+        id: analyze
         env:
           STOCK_LIST: ${{ vars.STOCK_LIST }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -38,10 +44,16 @@ jobs:
           MARKET_REVIEW_ENABLED: 'true'
           MARKET_REVIEW_REGION: us
           MAX_WORKERS: '2'
-        run: python main.py --no-notify
+        run: |
+          set -o pipefail
+          python main.py --no-notify ${{ inputs.force && '--force-run' || '' }} 2>&1 | tee /tmp/analyze.log
+          if grep -q "markets are closed today, skipping run" /tmp/analyze.log; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::US market closed today; no email sent"
+          fi
 
       - name: Restore Gmail OAuth files
-        if: always()
+        if: always() && steps.analyze.outputs.skip != 'true'
         env:
           GMAIL_CREDENTIALS_JSON: ${{ secrets.GMAIL_CREDENTIALS_JSON }}
           GMAIL_OAUTH_KEYS_JSON: ${{ secrets.GMAIL_OAUTH_KEYS_JSON }}
@@ -52,6 +64,7 @@ jobs:
           chmod 600 ~/.gmail-mcp/*.json
 
       - name: Send email
+        if: steps.analyze.outputs.skip != 'true'
         run: |
           test -n "$(ls reports/report_*.md 2>/dev/null)" || { echo "no stock report produced"; exit 1; }
           grep -q "共分析 \*\*0\*\* 只" reports/report_*.md && { echo "every stock failed"; exit 1; }
@@ -59,7 +72,7 @@ jobs:
           python personal/send.py /tmp/dsa_email.json
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.analyze.outputs.skip != 'true'
         with:
           name: reports-${{ github.run_id }}
           path: reports/
