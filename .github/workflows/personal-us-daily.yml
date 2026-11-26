@@ -82,4 +82,6 @@ jobs:
         if: failure()
         run: |
           echo "US daily analysis failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" > /tmp/err.txt
+          grep -q "Insufficient Balance" /tmp/analyze.log 2>/dev/null && echo "Cause: DeepSeek balance is empty. Top up at https://platform.deepseek.com/top_up" >> /tmp/err.txt
+          grep -oE "Succeeded: [0-9]+, failed: [0-9]+" /tmp/analyze.log 2>/dev/null | tail -1 >> /tmp/err.txt || true
           python personal/send.py --failure-alert --run-date "$(date +%F)" --step github_actions --error-file /tmp/err.txt
