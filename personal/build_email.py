@@ -30,7 +30,7 @@ def cell(value: str | None) -> str:
     return value.replace("|", "/").strip() if value else "—"
 
 
-lines = [f"# 美股每日分析 {date}", ""]
+lines = [f"# 美股盘前分析 {date}", ""]
 verdicts = re.findall(r"### 📌 核心结论\s+\*\*\S+ ([^*]+)\*\*", s)
 if verdicts:
     tally = {v.strip(): verdicts.count(v) for v in dict.fromkeys(verdicts)}
@@ -74,7 +74,7 @@ table{{border-collapse:collapse;width:100%}} th,td{{border:1px solid #d0d7de;pad
 th{{background:#f6f8fa}}
 </style></head><body>{body}</body></html>"""
 out.write_text(json.dumps({
-    "subject": f"美股每日分析 {date}",
+    "subject": f"美股盘前分析 {date}",
     "html": transform(html, keep_style_tags=False, disable_validation=True),
     "text": text,
 }, ensure_ascii=False), encoding="utf-8")

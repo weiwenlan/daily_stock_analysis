@@ -4,7 +4,9 @@ name: US Daily Analysis (personal)
 
 on:
   schedule:
-    - cron: '30 21 * * 1-5'   # 21:30 UTC = 13:30 PST, after the US close
+    # Pre-market. GitHub can delay scheduled runs, so a backup cron runs later and skips if today's email went out.
+    - cron: '17 11 * * 1-5'   # 11:17 UTC = 03:17 PST / 06:17 ET
+    - cron: '47 12 * * 1-5'   # 12:47 UTC = 04:47 PST / 07:47 ET (backup)
   workflow_dispatch:
     inputs:
       force:
@@ -14,13 +16,31 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: us-daily
   cancel-in-progress: false
 
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Skip a scheduled run if today's email already went out
+        id: check
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TODAY=$(TZ=America/New_York date +%F)
+          N=$(gh run list -R "$GITHUB_REPOSITORY" -w personal-us-daily.yml --event schedule --status success --created ">=$TODAY" --json databaseId -q 'length')
+          if [ "$N" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; fi
+
   analyze:
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
