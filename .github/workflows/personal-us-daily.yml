@@ -129,6 +129,7 @@ jobs:
           STOCK_LIST: ${{ vars.STOCK_LIST }}
           SEND: ${{ github.event_name == 'schedule' || inputs.send }}
         run: |
+          mkdir -p email
           python personal/build_payload.py --db data/stock_analysis.db --since "$RUN_START" --stocks "$STOCK_LIST" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --out email/payload.json
@@ -151,7 +152,7 @@ jobs:
           retention-days: 30
 
       - name: Alert on failure
-        if: failure()
+        if: failure() && (github.event_name == 'schedule' || inputs.send)
         run: |
           echo "US daily analysis failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" > /tmp/err.txt
           grep -q "Insufficient Balance" /tmp/analyze.log 2>/dev/null && echo "Cause: DeepSeek balance is empty. Top up at https://platform.deepseek.com/top_up" >> /tmp/err.txt
