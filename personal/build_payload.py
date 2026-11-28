@@ -51,19 +51,28 @@ def clean(text, prefix: str = "") -> str:
 
 
 def market_fields(markdown: str) -> dict:
-    # The model words these labels differently from day to day ("仓位" / "仓位区间",
-    # "失效条件" / "触发失效条件"), so match on the keyword inside the bold label.
-    def labeled(keyword: str) -> re.Match | None:
-        return re.search(rf"\*\*[^*\n]*{keyword}[^*\n]*\*\*\s*[：:]\s*(.+)", markdown)
+    """Pull the market view out of the LLM-written review.
 
-    signal = re.search(r"\*\*盘面信号\*\*\s*[：:]\s*(\d+/100)（([^，）]+)", markdown)
+    The model changes wording and layout every day: bold bullet labels
+    ("**仓位**:" / "**仓位区间**："), or one prose paragraph ("建议仓位控制在5-6成").
+    So match on the content shape inside the trading-plan section, not on labels.
+    """
+    text = markdown.replace("**", "")
+    plan_start = text.find("交易计划")
+    plan = text[plan_start:] if plan_start >= 0 else text
+    next_section = plan.find("###", 1)
+    plan = plan[:next_section] if next_section > 0 else plan
+
+    signal = re.search(r"盘面信号\s*[：:]\s*(\d+/100)（([^，）]+)", text)
     summary = re.search(r"^>\s*(.+)$", markdown, re.M)
-    position = labeled("仓位")
-    invalidation = labeled("失效")
+    position = re.search(r"仓位[^。\n\d]{0,12}?(\d+(?:\.\d+)?\s*[-–~至]\s*\d+(?:\.\d+)?\s*成)", plan) or re.search(
+        r"(\d+(?:\.\d+)?\s*[-–~至]\s*\d+(?:\.\d+)?\s*成)", plan
+    )
+    invalidation = re.search(r"失效条件\s*[：:]\s*([^。\n]+。?)", plan)
     return {
         "marketSignal": f"{signal.group(1)} {signal.group(2)}" if signal else DASH,
         "marketSummary": clean(summary.group(1)) if summary else DASH,
-        "marketPosition": clean(re.split(r"[，。,；;]", position.group(1))[0]) if position else DASH,
+        "marketPosition": clean(position.group(1)) if position else DASH,
         "marketInvalidation": clean(invalidation.group(1)) if invalidation else DASH,
     }
 
