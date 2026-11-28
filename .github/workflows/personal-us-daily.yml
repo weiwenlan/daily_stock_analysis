@@ -50,12 +50,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Shared email template service + sender (private repo, read-only deploy key).
+      - uses: actions/checkout@v4
+        with:
+          repository: weiwenlan/automation-email
+          ssh-key: ${{ secrets.AUTOMATION_EMAIL_DEPLOY_KEY }}
+          path: automation-email
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
 
-      - run: pip install -r requirements.txt markdown premailer
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: automation-email/package-lock.json
+
+      - run: pip install -r requirements.txt
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: automation-email
+
+      - name: Mark run start
+        run: echo "RUN_START=$(date -u '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
 
       - name: Analyze
         id: analyze
@@ -104,13 +123,22 @@ jobs:
           printf '%s' "$GMAIL_OAUTH_KEYS_JSON" > ~/.gmail-mcp/gcp-oauth.keys.json
           chmod 600 ~/.gmail-mcp/*.json
 
-      - name: Send email
-        if: steps.analyze.outputs.skip != 'true' && (github.event_name == 'schedule' || inputs.send)
+      - name: Build, render and send email
+        if: steps.analyze.outputs.skip != 'true'
+        env:
+          STOCK_LIST: ${{ vars.STOCK_LIST }}
+          SEND: ${{ github.event_name == 'schedule' || inputs.send }}
         run: |
-          test -n "$(ls reports/report_*.md 2>/dev/null)" || { echo "no stock report produced"; exit 1; }
-          grep -q "共分析 \*\*0\*\* 只" reports/report_*.md && { echo "every stock failed"; exit 1; }
-          python personal/build_email.py reports /tmp/dsa_email.json "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          python personal/send.py /tmp/dsa_email.json
+          python personal/build_payload.py --db data/stock_analysis.db --since "$RUN_START" --stocks "$STOCK_LIST" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --out email/payload.json
+          (cd automation-email && npx tsx src/render.tsx --template stock-premarket \
+            --payload ../email/payload.json --out-dir ../email)
+          if [ "$SEND" = "true" ]; then
+            python automation-email/send.py email/stock-premarket.json
+          else
+            echo "::notice::dry run: rendered email/stock-premarket.html, not sent"
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always() && steps.analyze.outputs.skip != 'true'
@@ -118,6 +146,7 @@ jobs:
           name: reports-${{ github.run_id }}
           path: |
             reports/
+            email/
             data/stock_analysis.db
           retention-days: 30
 
@@ -127,4 +156,4 @@ jobs:
           echo "US daily analysis failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" > /tmp/err.txt
           grep -q "Insufficient Balance" /tmp/analyze.log 2>/dev/null && echo "Cause: DeepSeek balance is empty. Top up at https://platform.deepseek.com/top_up" >> /tmp/err.txt
           grep -oE "Succeeded: [0-9]+, failed: [0-9]+" /tmp/analyze.log 2>/dev/null | tail -1 >> /tmp/err.txt || true
-          python personal/send.py --failure-alert --run-date "$(date +%F)" --step github_actions --error-file /tmp/err.txt
+          python automation-email/send.py --failure-alert --run-date "$(date +%F)" --step github_actions --error-file /tmp/err.txt
