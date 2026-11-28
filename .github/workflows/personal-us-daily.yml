@@ -13,6 +13,10 @@ on:
         description: Run even when the US market is closed
         type: boolean
         default: false
+      send:
+        description: Send the email (off = dry run, artifacts only)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -101,7 +105,7 @@ jobs:
           chmod 600 ~/.gmail-mcp/*.json
 
       - name: Send email
-        if: steps.analyze.outputs.skip != 'true'
+        if: steps.analyze.outputs.skip != 'true' && (github.event_name == 'schedule' || inputs.send)
         run: |
           test -n "$(ls reports/report_*.md 2>/dev/null)" || { echo "no stock report produced"; exit 1; }
           grep -q "共分析 \*\*0\*\* 只" reports/report_*.md && { echo "every stock failed"; exit 1; }
@@ -112,7 +116,9 @@ jobs:
         if: always() && steps.analyze.outputs.skip != 'true'
         with:
           name: reports-${{ github.run_id }}
-          path: reports/
+          path: |
+            reports/
+            data/stock_analysis.db
           retention-days: 30
 
       - name: Alert on failure
